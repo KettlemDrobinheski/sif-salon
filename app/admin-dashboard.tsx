@@ -211,7 +211,7 @@ export default function AdminDashboard() {
         <section className="flex-1 px-5 py-8 sm:px-8 lg:px-12">
           <header className="mb-8 flex flex-wrap items-start justify-between gap-4">
             <div>
-              <p className="mb-2 text-xs font-bold tracking-[0.18em] text-amber-700">GESTÃO DO SALÃO</p>
+              <p className="mb-2 text-xs font-bold tracking-[0.18em] text-amber-700">GESTÃO DO SALÃO - Matheus Baber</p>
               <h1 className="text-3xl font-bold tracking-tight">{tabs.find((item) => item.id === tab)?.label}</h1>
             </div>
             <button className="rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-stone-50" onClick={() => void carregarDados()} type="button">
