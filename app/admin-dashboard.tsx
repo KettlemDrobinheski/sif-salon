@@ -1,8 +1,11 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { Pencil, Trash2 } from "lucide-react";
 
+import { Modal } from "@/components/Modal";
 import {
+  calcularComissao,
   criarAdmin,
   criarFuncionario,
   criarServico,
@@ -14,6 +17,7 @@ import {
   type ServicoDocument,
 } from "@/lib/firestore-collections";
 import {
+  atualizarDocumento,
   calcularComissaoPorPeriodo,
   criarDocumento,
   listarAdmins,
@@ -21,6 +25,7 @@ import {
   listarFuncionarios,
   listarServicos,
   registrarAtendimento,
+  removerDocumento,
 } from "@/lib/firestore-client";
 
 type DocumentWithId<T> = T & { id: string };
@@ -49,6 +54,12 @@ export default function AdminDashboard() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [resumo, setResumo] = useState<ComissaoDocument | null>(null);
+  const [editingFuncionario, setEditingFuncionario] = useState<DocumentWithId<FuncionarioDocument> | null>(null);
+  const [deletingFuncionario, setDeletingFuncionario] = useState<DocumentWithId<FuncionarioDocument> | null>(null);
+  const [editingServico, setEditingServico] = useState<DocumentWithId<ServicoDocument> | null>(null);
+  const [deletingServico, setDeletingServico] = useState<DocumentWithId<ServicoDocument> | null>(null);
+  const [editingAtendimento, setEditingAtendimento] = useState<DocumentWithId<AtendimentoDocument> | null>(null);
+  const [deletingAtendimento, setDeletingAtendimento] = useState<DocumentWithId<AtendimentoDocument> | null>(null);
 
   const carregarDados = useCallback(async () => {
     setLoading(true);
@@ -144,6 +155,54 @@ export default function AdminDashboard() {
     }, "Serviço cadastrado.");
   }
 
+  function handleUpdateFuncionario(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingFuncionario) return;
+    const data = new FormData(event.currentTarget);
+
+    void salvar(async () => {
+      await atualizarDocumento<FuncionarioDocument>(
+        firestoreCollections.funcionarios,
+        editingFuncionario.id,
+        { nome: String(data.get("nome")), email: String(data.get("email")) },
+      );
+      setEditingFuncionario(null);
+    }, "Funcionário atualizado.");
+  }
+
+  function handleDeleteFuncionario() {
+    if (!deletingFuncionario) return;
+
+    void salvar(async () => {
+      await removerDocumento(firestoreCollections.funcionarios, deletingFuncionario.id);
+      setDeletingFuncionario(null);
+    }, "Funcionário excluído.");
+  }
+
+  function handleUpdateServico(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingServico) return;
+    const data = new FormData(event.currentTarget);
+
+    void salvar(async () => {
+      await atualizarDocumento<ServicoDocument>(firestoreCollections.servicos, editingServico.id, {
+        nome: String(data.get("nome")),
+        valor: Number(data.get("valor")),
+        percentualComissao: Number(data.get("percentualComissao")),
+      });
+      setEditingServico(null);
+    }, "Serviço atualizado.");
+  }
+
+  function handleDeleteServico() {
+    if (!deletingServico) return;
+
+    void salvar(async () => {
+      await removerDocumento(firestoreCollections.servicos, deletingServico.id);
+      setDeletingServico(null);
+    }, "Serviço excluído.");
+  }
+
   function handleCreateAtendimento(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
@@ -157,6 +216,39 @@ export default function AdminDashboard() {
       });
       form.reset();
     }, "Atendimento registrado e comissão calculada.");
+  }
+
+  function handleUpdateAtendimento(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingAtendimento) return;
+    const data = new FormData(event.currentTarget);
+    const servicoId = String(data.get("servicoId"));
+    const servico = servicos.find((item) => item.id === servicoId);
+    const clienteNome = String(data.get("clienteNome") || "");
+
+    void salvar(async () => {
+      if (!servico) throw new Error("Selecione um serviço válido.");
+
+      await atualizarDocumento<AtendimentoDocument>(firestoreCollections.atendimentos, editingAtendimento.id, {
+        funcionarioId: String(data.get("funcionarioId")),
+        servicoId,
+        nomeServico: servico.nome,
+        valor: servico.valor,
+        percentualComissao: servico.percentualComissao,
+        comissao: calcularComissao(servico.valor, servico.percentualComissao),
+        clienteNome,
+      });
+      setEditingAtendimento(null);
+    }, "Atendimento atualizado.");
+  }
+
+  function handleDeleteAtendimento() {
+    if (!deletingAtendimento) return;
+
+    void salvar(async () => {
+      await removerDocumento(firestoreCollections.atendimentos, deletingAtendimento.id);
+      setDeletingAtendimento(null);
+    }, "Atendimento excluído.");
   }
 
   function handleCalcularComissao(event: FormEvent<HTMLFormElement>) {
@@ -238,8 +330,18 @@ export default function AdminDashboard() {
               description="Cadastre e acompanhe os barbeiros ativos do salão."
               empty="Nenhum funcionário cadastrado."
               form={<FuncionarioForm onSubmit={handleCreateFuncionario} />}
-              rows={funcionarios.map((funcionario) => [funcionario.nome, funcionario.email, funcionario.cargo, funcionario.ativo ? "Ativo" : "Inativo"])}
-              headers={["Nome", "E-mail", "Cargo", "Status"]}
+              rows={funcionarios.map((funcionario) => [
+                funcionario.nome,
+                funcionario.email,
+                funcionario.cargo,
+                funcionario.ativo ? "Ativo" : "Inativo",
+                <RowActions
+                  key="actions"
+                  onEdit={() => setEditingFuncionario(funcionario)}
+                  onDelete={() => setDeletingFuncionario(funcionario)}
+                />,
+              ])}
+              headers={["Nome", "E-mail", "Cargo", "Status", "Ações"]}
             />
           )}
 
@@ -248,8 +350,18 @@ export default function AdminDashboard() {
               description="Defina os serviços, valores e percentuais de comissão do salão."
               empty="Nenhum serviço cadastrado."
               form={<ServicoForm onSubmit={handleCreateServico} />}
-              rows={servicos.map((servico) => [servico.nome, currency.format(servico.valor), `${servico.percentualComissao}%`, currency.format(servico.valor * servico.percentualComissao / 100)])}
-              headers={["Serviço", "Valor", "Comissão", "Valor da comissão"]}
+              rows={servicos.map((servico) => [
+                servico.nome,
+                currency.format(servico.valor),
+                `${servico.percentualComissao}%`,
+                currency.format(servico.valor * servico.percentualComissao / 100),
+                <RowActions
+                  key="actions"
+                  onEdit={() => setEditingServico(servico)}
+                  onDelete={() => setDeletingServico(servico)}
+                />,
+              ])}
+              headers={["Serviço", "Valor", "Comissão", "Valor da comissão", "Ações"]}
             />
           )}
 
@@ -258,8 +370,19 @@ export default function AdminDashboard() {
               description="Registre cada atendimento. A comissão é calculada automaticamente a partir do serviço escolhido."
               empty="Nenhum atendimento registrado."
               form={<AtendimentoForm funcionarios={funcionarios} servicos={servicos} onSubmit={handleCreateAtendimento} />}
-              rows={atendimentos.map((atendimento) => [atendimento.nomeServico, nomesFuncionarios.get(atendimento.funcionarioId) ?? "Funcionário removido", atendimento.clienteNome || "Não informado", currency.format(atendimento.valor), currency.format(atendimento.comissao)])}
-              headers={["Serviço", "Funcionário", "Cliente", "Valor", "Comissão"]}
+              rows={atendimentos.map((atendimento) => [
+                atendimento.nomeServico,
+                nomesFuncionarios.get(atendimento.funcionarioId) ?? "Funcionário removido",
+                atendimento.clienteNome || "Não informado",
+                currency.format(atendimento.valor),
+                currency.format(atendimento.comissao),
+                <RowActions
+                  key="actions"
+                  onEdit={() => setEditingAtendimento(atendimento)}
+                  onDelete={() => setDeletingAtendimento(atendimento)}
+                />,
+              ])}
+              headers={["Serviço", "Funcionário", "Cliente", "Valor", "Comissão", "Ações"]}
             />
           )}
 
@@ -268,24 +391,136 @@ export default function AdminDashboard() {
           )}
         </section>
       </div>
+
+      {editingFuncionario && (
+        <Modal title="Editar funcionário" onClose={() => setEditingFuncionario(null)}>
+          <FuncionarioForm
+            defaultValues={editingFuncionario}
+            onSubmit={handleUpdateFuncionario}
+            stacked
+            submitLabel="Salvar alterações"
+          />
+        </Modal>
+      )}
+
+      {deletingFuncionario && (
+        <Modal title="Excluir funcionário" onClose={() => setDeletingFuncionario(null)}>
+          <ConfirmDelete
+            message={`Tem certeza de que deseja excluir o funcionário "${deletingFuncionario.nome}"? Essa ação não pode ser desfeita.`}
+            onCancel={() => setDeletingFuncionario(null)}
+            onConfirm={handleDeleteFuncionario}
+          />
+        </Modal>
+      )}
+
+      {editingServico && (
+        <Modal title="Editar serviço" onClose={() => setEditingServico(null)}>
+          <ServicoForm
+            defaultValues={editingServico}
+            onSubmit={handleUpdateServico}
+            stacked
+            submitLabel="Salvar alterações"
+          />
+        </Modal>
+      )}
+
+      {deletingServico && (
+        <Modal title="Excluir serviço" onClose={() => setDeletingServico(null)}>
+          <ConfirmDelete
+            message={`Tem certeza de que deseja excluir o serviço "${deletingServico.nome}"? Essa ação não pode ser desfeita.`}
+            onCancel={() => setDeletingServico(null)}
+            onConfirm={handleDeleteServico}
+          />
+        </Modal>
+      )}
+
+      {editingAtendimento && (
+        <Modal title="Editar atendimento" onClose={() => setEditingAtendimento(null)}>
+          <AtendimentoForm
+            defaultValues={editingAtendimento}
+            funcionarios={funcionarios}
+            onSubmit={handleUpdateAtendimento}
+            servicos={servicos}
+            stacked
+            submitLabel="Salvar alterações"
+          />
+        </Modal>
+      )}
+
+      {deletingAtendimento && (
+        <Modal title="Excluir atendimento" onClose={() => setDeletingAtendimento(null)}>
+          <ConfirmDelete
+            message={`Tem certeza de que deseja excluir o atendimento "${deletingAtendimento.nomeServico}" de "${deletingAtendimento.clienteNome || "cliente não informado"}"? Essa ação não pode ser desfeita.`}
+            onCancel={() => setDeletingAtendimento(null)}
+            onConfirm={handleDeleteAtendimento}
+          />
+        </Modal>
+      )}
     </main>
   );
 }
 
-function EntityScreen({ description, form, headers, rows, empty }: { description: string; form: React.ReactNode; headers: string[]; rows: string[][]; empty: string }) {
+function EntityScreen({ description, form, headers, rows, empty }: { description: string; form: React.ReactNode; headers: string[]; rows: React.ReactNode[][]; empty: string }) {
   return <div className="space-y-7"><p className="max-w-2xl text-sm leading-6 text-stone-600">{description}</p><section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-stone-200">{form}</section><Table headers={headers} rows={rows} empty={empty} /></div>;
 }
 
-function Table({ headers, rows, empty }: { headers: string[]; rows: string[][]; empty: string }) {
-  return <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-stone-200"><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-stone-50 text-xs uppercase tracking-wide text-stone-500"><tr>{headers.map((header) => <th className="px-5 py-4 font-semibold" key={header}>{header}</th>)}</tr></thead><tbody className="divide-y divide-stone-100">{rows.length ? rows.map((row, index) => <tr key={`${row[0]}-${index}`}>{row.map((cell, cellIndex) => <td className="px-5 py-4 text-stone-700" key={`${cell}-${cellIndex}`}>{cell}</td>)}</tr>) : <tr><td className="px-5 py-8 text-center text-stone-500" colSpan={headers.length}>{empty}</td></tr>}</tbody></table></div></div>;
+function Table({ headers, rows, empty }: { headers: string[]; rows: React.ReactNode[][]; empty: string }) {
+  return <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-stone-200"><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-stone-50 text-xs uppercase tracking-wide text-stone-500"><tr>{headers.map((header) => <th className="px-5 py-4 font-semibold" key={header}>{header}</th>)}</tr></thead><tbody className="divide-y divide-stone-100">{rows.length ? rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td className="px-5 py-4 text-stone-700" key={cellIndex}>{cell}</td>)}</tr>) : <tr><td className="px-5 py-8 text-center text-stone-500" colSpan={headers.length}>{empty}</td></tr>}</tbody></table></div></div>;
+}
+
+function RowActions({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => void }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <button
+        aria-label="Editar"
+        className="rounded-lg p-2 text-stone-500 transition hover:bg-stone-100 hover:text-stone-900"
+        onClick={onEdit}
+        type="button"
+      >
+        <Pencil className="h-4 w-4" />
+      </button>
+      <button
+        aria-label="Excluir"
+        className="rounded-lg p-2 text-stone-500 transition hover:bg-red-50 hover:text-red-600"
+        onClick={onDelete}
+        type="button"
+      >
+        <Trash2 className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
+function ConfirmDelete({ message, onCancel, onConfirm }: { message: string; onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <div className="space-y-5">
+      <p className="text-sm leading-6 text-stone-600">{message}</p>
+      <div className="flex justify-end gap-3">
+        <button
+          className="rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-stone-50"
+          onClick={onCancel}
+          type="button"
+        >
+          Cancelar
+        </button>
+        <button
+          className="rounded-lg bg-red-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-red-700"
+          onClick={onConfirm}
+          type="button"
+        >
+          Excluir
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function AdminForm({ onSubmit }: { onSubmit: (event: FormEvent<HTMLFormElement>) => void }) { return <form className="grid gap-4 sm:grid-cols-3" onSubmit={onSubmit}><Input name="nome" label="Nome do administrador" /><Input name="email" label="E-mail" type="email" /><Submit label="Cadastrar administrador" /></form>; }
-function FuncionarioForm({ onSubmit }: { onSubmit: (event: FormEvent<HTMLFormElement>) => void }) { return <form className="grid gap-4 sm:grid-cols-3" onSubmit={onSubmit}><Input name="nome" label="Nome do funcionário" /><Input name="email" label="E-mail" type="email" /><Submit label="Cadastrar funcionário" /></form>; }
-function ServicoForm({ onSubmit }: { onSubmit: (event: FormEvent<HTMLFormElement>) => void }) { return <form className="grid gap-4 sm:grid-cols-4" onSubmit={onSubmit}><Input name="nome" label="Nome do serviço" /><Input name="valor" label="Valor (R$)" min="0" step="0.01" type="number" /><Input name="percentualComissao" label="Comissão (%)" min="0" max="100" type="number" /><Submit label="Cadastrar serviço" /></form>; }
+function FuncionarioForm({ defaultValues, onSubmit, submitLabel = "Cadastrar funcionário", stacked = false }: { defaultValues?: FuncionarioDocument; onSubmit: (event: FormEvent<HTMLFormElement>) => void; submitLabel?: string; stacked?: boolean }) { return <form className={`grid gap-4 ${stacked ? "grid-cols-1" : "sm:grid-cols-3"}`} onSubmit={onSubmit}><Input defaultValue={defaultValues?.nome} name="nome" label="Nome do funcionário" /><Input defaultValue={defaultValues?.email} name="email" label="E-mail" type="email" /><Submit label={submitLabel} /></form>; }
+function ServicoForm({ defaultValues, onSubmit, submitLabel = "Cadastrar serviço", stacked = false }: { defaultValues?: ServicoDocument; onSubmit: (event: FormEvent<HTMLFormElement>) => void; submitLabel?: string; stacked?: boolean }) { return <form className={`grid gap-4 ${stacked ? "grid-cols-1" : "sm:grid-cols-4"}`} onSubmit={onSubmit}><Input defaultValue={defaultValues?.nome} name="nome" label="Nome do serviço" /><Input defaultValue={defaultValues?.valor} name="valor" label="Valor (R$)" min="0" step="0.01" type="number" /><Input defaultValue={defaultValues?.percentualComissao} name="percentualComissao" label="Comissão (%)" min="0" max="100" type="number" /><Submit label={submitLabel} /></form>; }
 
-function AtendimentoForm({ funcionarios, servicos, onSubmit }: { funcionarios: DocumentWithId<FuncionarioDocument>[]; servicos: DocumentWithId<ServicoDocument>[]; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
-  return <form className="grid gap-4 sm:grid-cols-4" onSubmit={onSubmit}><Select name="funcionarioId" label="Funcionário" placeholder="Selecione" options={funcionarios.filter((item) => item.ativo).map((item) => ({ value: item.id, label: item.nome }))} /><Select name="servicoId" label="Serviço" placeholder="Selecione" options={servicos.filter((item) => item.ativo).map((item) => ({ value: item.id, label: `${item.nome} · ${currency.format(item.valor)}` }))} /><Input name="clienteNome" label="Nome do cliente" required={false} /><Submit label="Registrar atendimento" disabled={!funcionarios.length || !servicos.length} /></form>;
+function AtendimentoForm({ defaultValues, funcionarios, servicos, onSubmit, stacked = false, submitLabel = "Registrar atendimento" }: { defaultValues?: Pick<AtendimentoDocument, "funcionarioId" | "servicoId" | "clienteNome">; funcionarios: DocumentWithId<FuncionarioDocument>[]; servicos: DocumentWithId<ServicoDocument>[]; onSubmit: (event: FormEvent<HTMLFormElement>) => void; stacked?: boolean; submitLabel?: string }) {
+  return <form className={`grid gap-4 ${stacked ? "grid-cols-1" : "sm:grid-cols-4"}`} onSubmit={onSubmit}><Select defaultValue={defaultValues?.funcionarioId} name="funcionarioId" label="Funcionário" placeholder="Selecione" options={funcionarios.filter((item) => item.ativo).map((item) => ({ value: item.id, label: item.nome }))} /><Select defaultValue={defaultValues?.servicoId} name="servicoId" label="Serviço" placeholder="Selecione" options={servicos.filter((item) => item.ativo).map((item) => ({ value: item.id, label: `${item.nome} · ${currency.format(item.valor)}` }))} /><Input defaultValue={defaultValues?.clienteNome} name="clienteNome" label="Nome do cliente" required={false} /><Submit label={submitLabel} disabled={!funcionarios.length || !servicos.length} /></form>;
 }
 
 function CommissionScreen({ funcionarios, resumo, onSubmit }: { funcionarios: DocumentWithId<FuncionarioDocument>[]; resumo: ComissaoDocument | null; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
@@ -293,7 +528,7 @@ function CommissionScreen({ funcionarios, resumo, onSubmit }: { funcionarios: Do
 }
 
 function Input({ label, ...props }: React.InputHTMLAttributes<HTMLInputElement> & { label: string }) { return <label className="grid gap-1.5 text-sm font-medium text-stone-700"><span>{label}</span><input className="h-11 rounded-lg border border-stone-300 bg-white px-3 outline-none transition focus:border-amber-500 focus:ring-2 focus:ring-amber-100" required={props.required ?? true} {...props} /></label>; }
-function Select({ label, placeholder, options, name }: { label: string; placeholder: string; options: Array<{ value: string; label: string }>; name: string }) { return <label className="grid gap-1.5 text-sm font-medium text-stone-700"><span>{label}</span><select className="h-11 rounded-lg border border-stone-300 bg-white px-3 outline-none transition focus:border-amber-500 focus:ring-2 focus:ring-amber-100" name={name} required defaultValue=""><option disabled value="">{placeholder}</option>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>; }
+function Select({ label, placeholder, options, name, defaultValue = "" }: { label: string; placeholder: string; options: Array<{ value: string; label: string }>; name: string; defaultValue?: string }) { return <label className="grid gap-1.5 text-sm font-medium text-stone-700"><span>{label}</span><select className="h-11 rounded-lg border border-stone-300 bg-white px-3 outline-none transition focus:border-amber-500 focus:ring-2 focus:ring-amber-100" name={name} required defaultValue={defaultValue}><option disabled value="">{placeholder}</option>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>; }
 function Submit({ label, disabled = false }: { label: string; disabled?: boolean }) { return <button className="mt-auto h-11 rounded-lg bg-stone-950 px-4 text-sm font-bold text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300" disabled={disabled} type="submit">{label}</button>; }
 function Metric({ label, value }: { label: string; value: string }) { return <div className="rounded-2xl bg-stone-950 p-5 text-white"><p className="text-sm text-stone-400">{label}</p><p className="mt-2 text-2xl font-bold">{value}</p></div>; }
 function Alert({ children, tone }: { children: string; tone: "error" | "success" }) { return <div className={`mb-6 rounded-lg border px-4 py-3 text-sm ${tone === "error" ? "border-red-200 bg-red-50 text-red-800" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}>{children}</div>; }
